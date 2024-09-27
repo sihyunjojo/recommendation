@@ -44,6 +44,9 @@ public class ElasticsearchService {
     @Value("${elasticsearch.password}")
     private String elasticsearchPassword;
 
+    @Value("${elasticsearch.host}")
+    private String elasticsearchHost;
+
     private final RestTemplate restTemplate;
 
     public ElasticsearchService(RestTemplate restTemplate) {
@@ -81,13 +84,12 @@ public class ElasticsearchService {
         return new RecommendDto(parseTopAreaNames(response.getBody(), 5));
     }
 
+    // TODO: url 수정해야함/
     public RecommendDto searchByAreaNameForMultipleIndexes(String areaName) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
-        String elasticsearchHost = "es01";
         int elasticsearchPort = 9200;
-        String elasticsearchScheme = "https";
-        String username = "elastic";
-        String password = "safe0113";
-        String caCertPath = "~/certs/ca/ca.crt";
+        String elasticsearchScheme = "http";
+        // cert의 위치 확인
+        String caCertPath = "../certs/ca/ca.crt";
 
         // SSL 컨텍스트 생성
         SSLContextBuilder sslBuilder = new SSLContextBuilder();
@@ -96,7 +98,7 @@ public class ElasticsearchService {
         // 인증 제공자 설정
         CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
         credentialsProvider.setCredentials(AuthScope.ANY,
-                new UsernamePasswordCredentials(username, password));
+                new UsernamePasswordCredentials(elasticsearchUserName, elasticsearchPassword));
 
         // HttpClient 생성
         CloseableHttpClient httpClient = HttpClients.custom()
