@@ -1,0 +1,12 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: recommendation
+
+elasticsearch:
+  url: http://3.36.85.30:9200
+  username: elastic
+  password: safe0113
+
