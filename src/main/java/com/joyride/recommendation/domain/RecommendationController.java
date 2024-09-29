@@ -6,10 +6,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
 
 @RestController
 @RequiredArgsConstructor
@@ -26,8 +22,8 @@ public class RecommendationController {
     }
 
     @GetMapping("/board/search-term")
-    public ResponseEntity<RecommendDto> getBoardSearchTermRecommendation(@RequestParam String searchTerm) throws CertificateException, IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+    public ResponseEntity<RecommendDto> getBoardSearchTermRecommendation(@RequestParam String searchTerm) throws IOException{
         return ResponseEntity.ok()
-                .body(elasticsearchService.searchByAreaNameForMultipleIndexes(searchTerm));
+                .body(elasticsearchService.recommendBoardSearchTerm(searchTerm));
     }
 }
