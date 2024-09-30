@@ -105,7 +105,7 @@ public class ElasticsearchService {
             String url = "https://" + elasticsearchHost + ":" + elasticsearchPort + "/_msearch";
             HttpPost httpPost = new HttpPost(url);
 
-            String requestBody = createMultiIndexSearchTermRequestBody(searchTerm);
+            String requestBody = createMultiIndexSearchTermQuery(searchTerm);
             log.debug("requestBody = " + requestBody);
             httpPost.setEntity(new StringEntity(requestBody));
             httpPost.setHeader("Content-Type", "application/json");
@@ -144,9 +144,9 @@ public class ElasticsearchService {
 
 
     // Multi Index용 요청 본문 생성
-    private String createMultiIndexSearchTermRequestBody(String searchTerm) {
-        // area_search_term 인덱스 쿼리
-        String areaSearchQuery = String.format("""
+    private String createMultiIndexSearchTermQuery(String searchTerm) {
+        // area_board_search_term 인덱스 쿼리
+        String areaBoardSearchQuery = String.format("""
                 { "index": "area_board_search_term" }
                 {
                   "query": {
@@ -176,7 +176,8 @@ public class ElasticsearchService {
                 }
                 """, searchTerm);
 
-        String franchiseSearchQuery = String.format("""
+        // franchise_board_search_term 인덱스 쿼리
+        String franchiseBoardSearchQuery = String.format("""
                 { "index": "franchise_board_search_term" }
                 {
                   "query": {
@@ -206,8 +207,10 @@ public class ElasticsearchService {
                 }
                 """, searchTerm);
 
-        return areaSearchQuery + "\n" + franchiseSearchQuery + "\n";
+        // 두 쿼리를 NDJSON 형식으로 묶어서 반환
+        return areaBoardSearchQuery + "\n" + franchiseBoardSearchQuery;
     }
+
 //
 //    private String createBoardSearchTermRequestBody(String areaName) {
 //        return String.format("""
