@@ -8,6 +8,7 @@ import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
+import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -107,8 +108,11 @@ public class ElasticsearchService {
 
             String requestBody = createMultiIndexSearchTermQuery(searchTerm);
             log.debug("requestBody = " + requestBody);
-            httpPost.setEntity(new StringEntity(requestBody));
-            httpPost.setHeader("Content-Type", "application/json");
+//            httpPost.setEntity(new StringEntity(requestBody));
+//            httpPost.setHeader("Content-Type", "application/json");
+            // 아래 import 바꿔보기
+            httpPost.setEntity(new StringEntity(requestBody, ContentType.APPLICATION_JSON));
+            httpPost.setHeader("Content-Type", "application/x-ndjson");
 
             try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
                 String responseBody = EntityUtils.toString(response.getEntity());
@@ -145,70 +149,12 @@ public class ElasticsearchService {
 
     // Multi Index용 요청 본문 생성
     private String createMultiIndexSearchTermQuery(String searchTerm) {
-        // area_board_search_term 인덱스 쿼리
-        String areaBoardSearchQuery = String.format("""
-                { "index": "area_board_search_term" }
-                {
-                  "query": {
-                    "function_score": {
-                      "query": {
-                        "match": {
-                          "area_name": "%s"
-                        }
-                      },
-                      "functions": [
-                        {
-                          "field_value_factor": {
-                            "field": "post_count",
-                            "factor": 1.5,
-                            "modifier": "sqrt",
-                            "missing": 1
-                          }
-                        },
-                        {
-                          "random_score": {}
-                        }
-                      ],
-                      "score_mode": "sum",
-                      "boost_mode": "multiply"
-                    }
-                  }
-                }
-                """, searchTerm);
-
-        // franchise_board_search_term 인덱스 쿼리
-        String franchiseBoardSearchQuery = String.format("""
-                { "index": "franchise_board_search_term" }
-                {
-                  "query": {
-                    "function_score": {
-                      "query": {
-                        "match": {
-                          "franchise_name": "%s"
-                        }
-                      },
-                      "functions": [
-                        {
-                          "field_value_factor": {
-                            "field": "post_count",
-                            "factor": 1.5,
-                            "modifier": "sqrt",
-                            "missing": 1
-                          }
-                        },
-                        {
-                          "random_score": {}
-                        }
-                      ],
-                      "score_mode": "sum",
-                      "boost_mode": "multiply"
-                    }
-                  }
-                }
-                """, searchTerm);
-
-        // 두 쿼리를 NDJSON 형식으로 묶어서 반환
-        return areaBoardSearchQuery + "\n" + franchiseBoardSearchQuery;
+        return String.format("""
+                {"index": "area_board_search_term"}
+                {"query": {"function_score": {"query": {"match": {"area_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1}},{"random_score": {}}],"score_mode": "sum","boost_mode": "multiply"}}}
+                {"index": "franchise_board_search_term"}
+                {"query": {"function_score": {"query": {"match": {"franchise_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1}},{"random_score": {}}],"score_mode": "sum","boost_mode": "multiply"}}}
+                """, searchTerm, searchTerm);
     }
 
 //
@@ -271,9 +217,11 @@ public class ElasticsearchService {
 
     private String[] parseMultiIndexResults(String responseBody, int topN) {
         // JSON 응답 파싱
+        System.out.println("input" + responseBody);
         JSONObject jsonResponse = new JSONObject(responseBody);
+        System.out.println("JSONObject" + jsonResponse);
         JSONArray responses = jsonResponse.getJSONArray("responses");
-
+        System.out.println("JSONArray" + responses);
         // 모든 인덱스의 hits를 모아 하나의 리스트에 저장
         List<JSONObject> allHits = new ArrayList<>();
         for (int i = 0; i < responses.length(); i++) {
@@ -287,19 +235,27 @@ public class ElasticsearchService {
         }
 
         // 점수를 기준으로 정렬
-        allHits.sort((hit1, hit2) -> {
-            double score1 = hit1.getDouble("_score");
-            double score2 = hit2.getDouble("_score");
-            return Double.compare(score2, score1); // 내림차순 정렬
-        });
+        allHits.sort((hit1, hit2) -> Double.compare(hit2.getDouble("_score"), hit1.getDouble("_score")));
+
+        String[] topNames = new String[Math.min(topN, allHits.size())];
+        for (int i = 0; i < topNames.length; i++) {
+            JSONObject source = allHits.get(i).getJSONObject("_source");
+            topNames[i] = source.has("area_name") ? source.getString("area_name") : source.getString("franchise_name");
+        }
+//        allHits.sort((hit1, hit2) -> {
+//            double score1 = hit1.getDouble("_score");
+//            double score2 = hit2.getDouble("_score");
+//            return Double.compare(score2, score1); // 내림차순 정렬
+//        });
 
         // 결과를 String[] 배열로 변환하여 반환
-        String[] topAreaNames = new String[Math.min(topN, allHits.size())];
-        for (int i = 0; i < topAreaNames.length; i++) {
-            topAreaNames[i] = allHits.get(i).getJSONObject("_source").getString("area_name");
-        }
+//        String[] topAreaNames = new String[Math.min(topN, allHits.size())];
+//        for (int i = 0; i < topAreaNames.length; i++) {
+//            topAreaNames[i] = allHits.get(i).getJSONObject("_source").getString("area_name");
+//        }
 
-        return topAreaNames;
+//        return topAreaNames;
+        return topNames;
     }
 
 
