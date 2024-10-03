@@ -6,16 +6,12 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.DefaultHostnameVerifier;
 import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 
 import org.apache.http.impl.client.BasicCredentialsProvider;
@@ -24,15 +20,9 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.util.EntityUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
 
-import java.io.File;
 import java.io.IOException;
-import java.security.KeyManagementException;
 import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,9 +33,6 @@ import org.json.JSONObject;
 @Slf4j
 @Service
 public class ElasticsearchService {
-
-    @Value("${elasticsearch.url}")
-    private String elasticsearchUrl;
 
     @Value("${elasticsearch.username}")
     private String elasticsearchUserName;
@@ -62,55 +49,39 @@ public class ElasticsearchService {
     @Value("${elasticsearch.ca-cert-path}")
     private String elasticsearchCaCertPath;
 
-    private final RestTemplate restTemplate;
+    public RecommendDto searchByAreaName(String areaName) throws IOException {
+        try (CloseableHttpClient httpClient = createHttpClient()) {
+            String index = "area_search_term";
+            String searchUrl = "https://" + elasticsearchHost + ":" + elasticsearchPort + "/" + index + "/_search";
+            HttpPost httpPost = new HttpPost(searchUrl);
 
-    public ElasticsearchService(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+            // 요청 본문 생성
+            String requestBody = createSearchByAreaNameQuery(areaName);
+
+            // 요청 본문을 설정
+            httpPost.setEntity(new StringEntity(requestBody, ContentType.APPLICATION_JSON));
+
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                String responseBody = EntityUtils.toString(response.getEntity());
+
+                // 응답 파싱 및 DTO로 변환
+                return new RecommendDto(parseTopAreaNames(responseBody, 5));
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while searching Elasticsearch", e);
+            throw new IOException("Failed to search Elasticsearch", e);
+        }
     }
 
-    // TODO: 아래처럼 수정해야함
-    public RecommendDto searchByAreaName(String areaName) {
-        String index = "area_search_term";
-        String searchUrl = elasticsearchUrl + "/" + index + "/_search";
-
-        String requestBody = """
-                {
-                  "query": {
-                    "function_score": {
-                      "query": {
-                        "match": {
-                          "area_name": "%s"
-                        }
-                      },
-                      "field_value_factor": {
-                        "field": "post_count",
-                        "factor": 1.5,
-                        "modifier": "sqrt",
-                        "missing": 1
-                      },
-                      "boost_mode": "multiply"
-                    }
-                  }
-                }
-                """.formatted(areaName);
-
-        // 요청 본문만 포함하여 HTTP POST 요청 보내기
-        ResponseEntity<String> response = restTemplate.postForEntity(searchUrl, requestBody, String.class);
-
-        return new RecommendDto(parseTopAreaNames(response.getBody(), 5));
-    }
 
     public RecommendDto recommendBoardSearchTerm(String searchTerm) throws IOException {
         try (CloseableHttpClient httpClient = createHttpClient()) {
-//            String url = "https://" + elasticsearchHost + ":" + elasticsearchPort + "/area_search_term/_search";
             String url = "https://" + elasticsearchHost + ":" + elasticsearchPort + "/_msearch";
             HttpPost httpPost = new HttpPost(url);
 
             String requestBody = createMultiIndexSearchTermQuery(searchTerm);
             log.debug("requestBody = " + requestBody);
-//            httpPost.setEntity(new StringEntity(requestBody));
-//            httpPost.setHeader("Content-Type", "application/json");
-            // 아래 import 바꿔보기
+
             httpPost.setEntity(new StringEntity(requestBody, ContentType.APPLICATION_JSON));
             httpPost.setHeader("Content-Type", "application/x-ndjson");
 
@@ -127,101 +98,151 @@ public class ElasticsearchService {
     }
 
     private CloseableHttpClient createHttpClient() throws Exception {
-        // KeyStore 유형: 위의 방법이 작동하지 않으면 KeyStore 유형을 명시적으로 지정해야 할 수도 있습니다.
-        // 호출을 수정해 보세요 loadTrustMaterial.
         SSLContextBuilder sslBuilder = new SSLContextBuilder();
-        sslBuilder.loadTrustMaterial(
-                KeyStore.getInstance(KeyStore.getDefaultType()),
-                new TrustSelfSignedStrategy()
-        );
-
-        CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-        credentialsProvider.setCredentials(AuthScope.ANY,
-                new UsernamePasswordCredentials(elasticsearchUserName, elasticsearchPassword));
+        sslBuilder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
 
         return HttpClients.custom()
                 .setSSLContext(sslBuilder.build())
-                .setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE)
-                .setDefaultCredentialsProvider(credentialsProvider)
+                .setSSLHostnameVerifier(new DefaultHostnameVerifier())
+                .setDefaultCredentialsProvider(getCredentialsProvider())
                 .build();
     }
 
+    private CredentialsProvider getCredentialsProvider() {
+        CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+        credentialsProvider.setCredentials(new AuthScope(elasticsearchHost, Integer.parseInt(elasticsearchPort)),
+                new UsernamePasswordCredentials(elasticsearchUserName, elasticsearchPassword));
+        return credentialsProvider;
+    }
 
+    // sudo keytool -importcert -file /home/sihyun/certs/ca/ca.crt -alias elasticsearch -keystore $JAVA_HOME/lib/security/cacerts -storepass changeit
+    // 1. 자체 서명된 인증서 사용 대신 신뢰할 수 있는 CA 인증서 사용
+    // 2. 호스트 이름 검증 활성화
+    // 3. 특정 AuthScope로 제한
+    // SSL 인증서를 신뢰할 수 있도록 설정된 HTTP 클라이언트를 생성합니다. (서비스용)
+//    private CloseableHttpClient createHttpClient() throws Exception {
+//        // 신뢰할 수 있는 CA에서 발급된 인증서를 사용하도록 SSLContext 설정
+//        SSLContextBuilder sslBuilder = new SSLContextBuilder();
+//        sslBuilder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
+//
+//
+//        // 신뢰할 수 있는 인증서를 사용하도록 키스토어 설정
+//        sslBuilder.loadTrustMaterial(
+//                KeyStore.getInstance(KeyStore.getDefaultType()), // 기본 키스토어 사용
+//                null // 신뢰할 수 있는 CA 인증서를 사용하기 때문에 TrustSelfSignedStrategy는 사용하지 않음
+//        );
+//
+//        // HTTP 클라이언트 인증 정보 설정
+//        CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+//        credentialsProvider.setCredentials(
+//                new AuthScope(elasticsearchHost, Integer.parseInt(elasticsearchPort)), // 특정 호스트와 포트에 대한 자격 증명 설정
+//                new UsernamePasswordCredentials(elasticsearchUserName, elasticsearchPassword)
+//        );
+//
+//        // HTTP 클라이언트 생성 및 반환
+//        return HttpClients.custom() // 커스텀 클라이언트 생성
+//                .setSSLContext(sslBuilder.build()) // 신뢰할 수 있는 인증서를 사용하는 SSL 설정 적용
+//                .setSSLHostnameVerifier(new DefaultHostnameVerifier()) // 호스트 이름 검증 활성화
+//                .setDefaultCredentialsProvider(credentialsProvider) // 기본 인증 제공자 설정
+//                .build(); // HTTP 클라이언트 빌드
+//    }
+
+
+    // SSL 인증서를 신뢰할 수 있도록 설정된 HTTP 클라이언트를 생성합니다. (개발용)
+//    private CloseableHttpClient createHttpClient() throws Exception {
+//        // SSL 인증서 설정을 위한 빌더 생성 (기본 키스토어를 사용하여 신뢰할 수 있는 인증서 설정)
+//        SSLContextBuilder sslBuilder = new SSLContextBuilder();
+//        sslBuilder.loadTrustMaterial(
+//                // 기본 키스토어 형식을 사용하여 인증서 가져오기
+//                KeyStore.getInstance(KeyStore.getDefaultType()),
+//                // 신뢰할 수 있는 자체 서명된 인증서 설정
+//                new TrustSelfSignedStrategy()
+//        );
+//
+//        // HTTP 클라이언트 인증 정보 설정
+//        CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+//        credentialsProvider.setCredentials(AuthScope.ANY,
+//                // 사용자 이름과 비밀번호를 사용한 자격 증명 설정
+//                new UsernamePasswordCredentials(elasticsearchUserName, elasticsearchPassword));
+//
+//        // HTTP 클라이언트 생성 및 반환
+//        return HttpClients.custom()
+//                .setSSLContext(sslBuilder.build())
+//                .setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+//                .setDefaultCredentialsProvider(credentialsProvider)
+//                .build();
+//    }
+
+
+    // 요청 본문 생성 메서드
+    private String createSearchByAreaNameQuery(String areaName) {
+        return String.format("""
+            {
+              "query": {
+                "function_score": {
+                  "query": {
+                    "match": {
+                      "area_name": "%s"
+                    }
+                  },
+                  "functions": [
+                    {
+                      "field_value_factor": {
+                        "field": "post_count",
+                        "factor": 1.5,
+                        "modifier": "sqrt",
+                        "missing": 1
+                      }
+                    }
+                  ],
+                  "score_mode": "sum",
+                  "boost_mode": "multiply",
+                  "boost": 0.6
+                }
+              }
+            }
+            """, areaName);
+    }
+
+    // String[]**는 고정된 수의 데이터에 대해 빠른 접근이 필요할 때 유용
+    // 응답을 파싱하고 상위 N개의 area_name을 반환
+    private String[] parseTopAreaNames(String responseBody, int topN) {
+        // 응답 본문을 JSON 객체로 변환
+        JSONObject jsonResponse = new JSONObject(responseBody);
+        JSONArray hits = jsonResponse.getJSONObject("hits").getJSONArray("hits");
+
+        String[] topAreaNames = new String[Math.min(topN, hits.length())];
+        for (int i = 0; i < topAreaNames.length; i++) {
+            topAreaNames[i] = hits.getJSONObject(i).getJSONObject("_source").getString("area_name");
+        }
+
+        return topAreaNames;
+    }
+
+    /**
+     * 기본 점수: nori 분석기를 통한 텍스트 일치 점수. 예: 3.5
+     * 가중치 적용: post_count를 기반으로 계산된 가중치. 예: 7.5 (sqrt(25) * 1.5)
+     * weight 추가: post_count에 가중치 0.4를 적용하여 6:4 비율을 맞췄습니다.
+     * 최종 점수: 기본 점수와 가중치를 합산 또는 곱셈하여 최종 문서 점수 결정. 예: (3.5 * 0.6) + (7.5 * 0.4) = 최종 값
+     * @param searchTerm
+     * @return
+     */
     // Multi Index용 요청 본문 생성
     private String createMultiIndexSearchTermQuery(String searchTerm) {
         return String.format("""
-                {"index": "area_board_search_term"}
-                {"query": {"function_score": {"query": {"match": {"area_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1}},{"random_score": {}}],"score_mode": "sum","boost_mode": "multiply"}}}
-                {"index": "franchise_board_search_term"}
-                {"query": {"function_score": {"query": {"match": {"franchise_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1}},{"random_score": {}}],"score_mode": "sum","boost_mode": "multiply"}}}
-                """, searchTerm, searchTerm);
+        {"index": "area_board_search_term"}
+        {"query": {"function_score": {"query": {"match": {"area_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1},"weight": 0.4}],"score_mode": "sum","boost_mode": "multiply","boost": 0.6}}}
+        {"index": "franchise_board_search_term"}
+        {"query": {"function_score": {"query": {"match": {"franchise_name": "%s"}},"functions": [{"field_value_factor": {"field": "post_count","factor": 1.5,"modifier": "sqrt","missing": 1},"weight": 0.4}],"score_mode": "sum","boost_mode": "multiply","boost": 0.6}}}
+        """, searchTerm, searchTerm);
     }
-
-//
-//    private String createBoardSearchTermRequestBody(String areaName) {
-//        return String.format("""
-//            {
-//              "query": {
-//                "function_score": {
-//                  "query": {
-//                    "match": {
-//                      "area_name": "%s"
-//                    }
-//                  },
-//                  "field_value_factor": {
-//                    "field": "post_count",
-//                    "factor": 1.5,
-//                    "modifier": "sqrt",
-//                    "missing": 1
-//                  },
-//                  "boost_mode": "multiply"
-//                }
-//              }
-//            }
-//            """, areaName);
-//    }
-
-//
-//    public RecommendDto searchByAreaNameForMultipleIndexes(String areaName){
-//        String index = "area_board_search_term,franchise_board_search_term";
-//        String searchUrl = elasticsearchUrl + "/" + index + "/_search";
-//
-//        // 요청 본문 생성 (텍스트 블록 사용)
-//        String requestBody = """
-//            {
-//              "query": {
-//                "function_score": {
-//                  "query": {
-//                    "match": {
-//                      "area_name": "%s"
-//                    }
-//                  },
-//                  "field_value_factor": {
-//                    "field": "post_count",
-//                    "factor": 1.5,
-//                    "modifier": "sqrt",
-//                    "missing": 1
-//                  },
-//                  "boost_mode": "multiply"
-//                }
-//              }
-//            }
-//            """.formatted(areaName);
-//
-//        // 요청 본문만 포함하여 HTTP POST 요청 보내기
-//        ResponseEntity<String> response = restTemplate.postForEntity(searchUrl, requestBody, String.class);
-//
-//        return new RecommendDto(parseTopAreaNames(response.getBody(), 5));
-//    }
 
 
     private String[] parseMultiIndexResults(String responseBody, int topN) {
         // JSON 응답 파싱
-        System.out.println("input" + responseBody);
         JSONObject jsonResponse = new JSONObject(responseBody);
-        System.out.println("JSONObject" + jsonResponse);
         JSONArray responses = jsonResponse.getJSONArray("responses");
-        System.out.println("JSONArray" + responses);
+
         // 모든 인덱스의 hits를 모아 하나의 리스트에 저장
         List<JSONObject> allHits = new ArrayList<>();
         for (int i = 0; i < responses.length(); i++) {
@@ -242,45 +263,10 @@ public class ElasticsearchService {
             JSONObject source = allHits.get(i).getJSONObject("_source");
             topNames[i] = source.has("area_name") ? source.getString("area_name") : source.getString("franchise_name");
         }
-//        allHits.sort((hit1, hit2) -> {
-//            double score1 = hit1.getDouble("_score");
-//            double score2 = hit2.getDouble("_score");
-//            return Double.compare(score2, score1); // 내림차순 정렬
-//        });
-
-        // 결과를 String[] 배열로 변환하여 반환
-//        String[] topAreaNames = new String[Math.min(topN, allHits.size())];
-//        for (int i = 0; i < topAreaNames.length; i++) {
-//            topAreaNames[i] = allHits.get(i).getJSONObject("_source").getString("area_name");
-//        }
-
-//        return topAreaNames;
         return topNames;
     }
-
-
-    // String[]**는 고정된 수의 데이터에 대해 빠른 접근이 필요할 때 유용
-    private String[] parseTopAreaNames(String responseBody, int topN) {
-        // JSON 응답 파싱
-        JSONObject jsonResponse = new JSONObject(responseBody);
-        JSONArray hits = jsonResponse.getJSONObject("hits").getJSONArray("hits");
-
-        // 점수가 높은 topN 개의 area_name 추출
-        String[] topAreaNames = new String[Math.min(topN, hits.length())];
-        for (int i = 0; i < topAreaNames.length; i++) {
-            topAreaNames[i] = hits.getJSONObject(i).getJSONObject("_source").getString("area_name");
-        }
-
-        return topAreaNames;
-    }
-
-    // 헤더를 설정하는 메소드
-    private HttpHeaders createHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
-    }
 }
+
 //
 //// ... 기존 import 문 유지 ...
 //
