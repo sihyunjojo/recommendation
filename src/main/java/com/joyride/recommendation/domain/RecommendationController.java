@@ -15,8 +15,7 @@ public class RecommendationController {
     private final ElasticsearchService elasticsearchService;
 
     @GetMapping("/area")
-    public ResponseEntity<RecommendDto> getAreaRecommendation(@RequestParam String areaName) {
-        System.out.println(areaName);
+    public ResponseEntity<RecommendDto> getAreaRecommendation(@RequestParam String areaName) throws IOException {
         return ResponseEntity.ok()
                         .body(elasticsearchService.searchByAreaName(areaName));
     }
