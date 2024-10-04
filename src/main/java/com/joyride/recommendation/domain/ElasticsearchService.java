@@ -123,35 +123,66 @@ public class ElasticsearchService {
     // 요청 본문 생성 메서드
     private String createSearchByAreaNameQuery(String areaName) {
         return String.format("""
-                {
-                  "query": {
-                    "function_score": {
-                      "query": {
-                        "match": {
-                          "area_name": {
-                            "query": "%s",
-                            "analyzer": "nori_analyzer"
-                          }
-                        }
-                      },
-                      "functions": [
-                        {
-                          "script_score": {
-                            "script": {
-                              "source": "double baseScore = _score; double maxView = 100.0; double currentView = doc['view'].value != null ? doc['view'].value : 1; double viewRatio = currentView / maxView; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = viewRatio * maxAllowedFactor; return baseScore + adjustedFactor;"
-                            }
-                          }
-                        }
-                      ],
-                      "score_mode": "sum",
-                      "boost_mode": "multiply"
-                    }
-                  },
-                  "size": 10,
-                  "_source": ["area_name"]
+        {
+          "query": {
+            "function_score": {
+              "query": {
+                "match": {
+                  "area_name": {
+                    "query": "%s",
+                    "analyzer": "ngram_analyzer"
+                  }
                 }
-                """, areaName);
+              },
+              "functions": [
+                {
+                  "script_score": {
+                    "script": {
+                      "source": "double baseScore = _score; double maxView = 100.0; double currentView = doc['view'].value != null ? doc['view'].value : 1; double viewRatio = currentView / maxView; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = viewRatio * maxAllowedFactor; return baseScore + adjustedFactor;"
+                    }
+                  }
+                }
+              ],
+              "score_mode": "sum",
+              "boost_mode": "multiply"
+            }
+          },
+          "size": 10,
+          "_source": ["area_name"]
+        }
+        """, areaName);
     }
+//    private String createSearchByAreaNameQuery(String areaName) {
+//        return String.format("""
+//                {
+//                  "query": {
+//                    "function_score": {
+//                      "query": {
+//                        "match": {
+//                          "area_name": {
+//                            "query": "%s",
+//                            "analyzer": "nori_analyzer"
+//                          }
+//                        }
+//                      },
+//                      "functions": [
+//                        {
+//                          "script_score": {
+//                            "script": {
+//                              "source": "double baseScore = _score; double maxView = 100.0; double currentView = doc['view'].value != null ? doc['view'].value : 1; double viewRatio = currentView / maxView; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = viewRatio * maxAllowedFactor; return baseScore + adjustedFactor;"
+//                            }
+//                          }
+//                        }
+//                      ],
+//                      "score_mode": "sum",
+//                      "boost_mode": "multiply"
+//                    }
+//                  },
+//                  "size": 10,
+//                  "_source": ["area_name"]
+//                }
+//                """, areaName);
+//    }
 
     // String[]**는 고정된 수의 데이터에 대해 빠른 접근이 필요할 때 유용
     // 응답을 파싱하고 상위 N개의 area_name을 반환
@@ -178,15 +209,14 @@ public class ElasticsearchService {
      * @return
      */
     // Multi Index용 요청 본문 생성
-    private String createMultiIndexSearchTermQuery(String searchTerm) {
+    public String createMultiIndexSearchTermQuery(String searchTerm) {
         return String.format("""
                 {"index":"area_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["area_name"]}
+                {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"ngram_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["area_name"]}
                 {"index":"franchise_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["franchise_name"]}
+                {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"ngram_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["franchise_name"]}
                 """, searchTerm, searchTerm);
     }
-
 
     private String[] parseMultiIndexResults(String responseBody, int topN) {
         // JSON 응답 파싱
