@@ -2,17 +2,57 @@
 ```bash
 {
   "area_search_term": {
+    "aliases": {},
     "mappings": {
       "properties": {
+        "area_name": {
+          "type": "text",
+          "analyzer": "ngram_analyzer"
+        },
         "id": {
           "type": "long"
         },
-        "area_name": {
-          "type": "text",
-          "analyzer": "nori_analyzer"
-        },
         "view": {
           "type": "integer"
+        }
+      }
+    },
+    "settings": {
+      "index": {
+        "max_ngram_diff": "2",
+        "routing": {
+          "allocation": {
+            "include": {
+              "_tier_preference": "data_content"
+            }
+          }
+        },
+        "number_of_shards": "1",
+        "provided_name": "area_search_term",
+        "creation_date": "1728050776926",
+        "analysis": {
+          "analyzer": {
+            "ngram_analyzer": {
+              "type": "custom",
+              "tokenizer": "ngram_tokenizer"
+            }
+          },
+          "tokenizer": {
+            "ngram_tokenizer": {
+              "token_chars": [
+                "letter",
+                "digit"
+              ],
+              "min_gram": "1",
+              "type": "ngram",
+              "max_gram": "3"
+            }
+          }
+        },
+        "number_of_replicas": "1",
+        "uuid": "WPlraNAmRPWAqgJ2WDJWWA",
+        "version": {
+          "created": "8080299"
         }
       }
     }
@@ -24,6 +64,7 @@
 ```bash
 {
   "area_board_search_term": {
+    "aliases": {},
     "mappings": {
       "properties": {
         "area_id": {
@@ -31,7 +72,8 @@
         },
         "area_name": {
           "type": "text",
-          "analyzer": "nori_analyzer"
+          "analyzer": "nori_analyzer",
+          "search_analyzer": "ngram_analyzer"
         },
         "max_updated_at": {
           "type": "date"
@@ -40,16 +82,75 @@
           "type": "integer"
         }
       }
+    },
+    "settings": {
+      "index": {
+        "max_ngram_diff": "2",
+        "routing": {
+          "allocation": {
+            "include": {
+              "_tier_preference": "data_content"
+            }
+          }
+        },
+        "number_of_shards": "1",
+        "provided_name": "area_board_search_term",
+        "creation_date": "1728057175844",
+        "analysis": {
+          "filter": {
+            "ngrammer": {
+              "type": "ngram",
+              "min_gram": "1",
+              "max_gram": "3"
+            }
+          },
+          "analyzer": {
+            "ngram_analyzer": {
+              "filter": [
+                "lowercase"
+              ],
+              "type": "custom",
+              "tokenizer": "ngram_tokenizer"
+            },
+            "nori_analyzer": {
+              "filter": [
+                "nori_readingform",
+                "nori_part_of_speech",
+                "lowercase",
+                "ngrammer"
+              ],
+              "type": "custom",
+              "tokenizer": "nori_tokenizer"
+            }
+          },
+          "tokenizer": {
+            "ngram_tokenizer": {
+              "token_chars": [
+                "letter",
+                "digit"
+              ],
+              "min_gram": "1",
+              "type": "ngram",
+              "max_gram": "3"
+            }
+          }
+        },
+        "number_of_replicas": "1",
+        "uuid": "6bmNjCTVS6GPt-6yiW5ngw",
+        "version": {
+          "created": "8080299"
+        }
+      }
     }
   }
 }
-
 ```
 
 # franchise_board_search_term
 ```bash
 {
   "franchise_board_search_term": {
+    "aliases": {},
     "mappings": {
       "properties": {
         "franchise_id": {
@@ -57,7 +158,8 @@
         },
         "franchise_name": {
           "type": "text",
-          "analyzer": "nori_analyzer"
+          "analyzer": "nori_analyzer",
+          "search_analyzer": "ngram_analyzer"
         },
         "max_updated_at": {
           "type": "date"
@@ -66,10 +168,68 @@
           "type": "integer"
         }
       }
+    },
+    "settings": {
+      "index": {
+        "max_ngram_diff": "2",
+        "routing": {
+          "allocation": {
+            "include": {
+              "_tier_preference": "data_content"
+            }
+          }
+        },
+        "number_of_shards": "1",
+        "provided_name": "franchise_board_search_term",
+        "creation_date": "1728057178586",
+        "analysis": {
+          "filter": {
+            "ngrammer": {
+              "type": "ngram",
+              "min_gram": "1",
+              "max_gram": "3"
+            }
+          },
+          "analyzer": {
+            "ngram_analyzer": {
+              "filter": [
+                "lowercase"
+              ],
+              "type": "custom",
+              "tokenizer": "ngram_tokenizer"
+            },
+            "nori_analyzer": {
+              "filter": [
+                "nori_readingform",
+                "nori_part_of_speech",
+                "lowercase",
+                "ngrammer"
+              ],
+              "type": "custom",
+              "tokenizer": "nori_tokenizer"
+            }
+          },
+          "tokenizer": {
+            "ngram_tokenizer": {
+              "token_chars": [
+                "letter",
+                "digit"
+              ],
+              "min_gram": "1",
+              "type": "ngram",
+              "max_gram": "3"
+            }
+          }
+        },
+        "number_of_replicas": "1",
+        "uuid": "Q25BlsxRQQWLRBR3OWHcjg",
+        "version": {
+          "created": "8080299"
+        }
+      }
     }
   }
 }
-
 ```
 ### 생성문
 ngram_tokenizer: 텍스트를 지정된 길이의 n-gram 단위로 나누어 색인 및 검색 성능을 개선하는 토크나이저
@@ -124,32 +284,40 @@ PUT /area_search_term
 ```
 
 ```bash
-PUT /franchise_board_search_term
+PUT franchise_board_search_term
 {
   "settings": {
     "index": {
-      "max_ngram_diff": 2  // min_gram과 max_gram의 차이를 2로 허용
-    },
-    "analysis": {
-      "analyzer": {
-        "nori_analyzer": {
-          "type": "custom",
-          "tokenizer": "nori_tokenizer"
+      "max_ngram_diff": "2",
+      "number_of_shards": "1",
+      "number_of_replicas": "1",
+      "analysis": {
+        "analyzer": {
+          "nori_analyzer": {
+            "type": "custom",
+            "tokenizer": "nori_tokenizer",
+            "filter": ["nori_readingform", "nori_part_of_speech", "lowercase", "ngrammer"]
+          },
+          "ngram_analyzer": {
+            "type": "custom",
+            "tokenizer": "ngram_tokenizer",
+            "filter": ["lowercase"]
+          }
         },
-        "ngram_analyzer": {
-          "type": "custom",
-          "tokenizer": "ngram_tokenizer"
-        }
-      },
-      "tokenizer": {
-        "ngram_tokenizer": {
-          "type": "ngram",
-          "min_gram": 1,
-          "max_gram": 3,
-          "token_chars": [
-            "letter",
-            "digit"
-          ]
+        "tokenizer": {
+          "ngram_tokenizer": {
+            "type": "ngram",
+            "min_gram": "1",
+            "max_gram": "3",
+            "token_chars": ["letter", "digit"]
+          }
+        },
+        "filter": {
+          "ngrammer": {
+            "type": "ngram",
+            "min_gram": 1,
+            "max_gram": 3
+          }
         }
       }
     }
@@ -161,8 +329,8 @@ PUT /franchise_board_search_term
       },
       "franchise_name": {
         "type": "text",
-        "analyzer": "nori_analyzer",         // 색인 시 nori 분석기 사용
-        "search_analyzer": "ngram_analyzer"  // 검색 시 n-gram 분석기 사용
+        "analyzer": "nori_analyzer",
+        "search_analyzer": "ngram_analyzer"
       },
       "max_updated_at": {
         "type": "date"
@@ -174,32 +342,40 @@ PUT /franchise_board_search_term
   }
 }
 
-PUT /area_board_search_term
+PUT area_board_search_term
 {
   "settings": {
     "index": {
-      "max_ngram_diff": 2  // min_gram과 max_gram의 차이를 2로 허용
-    },
-    "analysis": {
-      "analyzer": {
-        "nori_analyzer": {  // 색인 시 사용될 nori 분석기
-          "type": "custom",
-          "tokenizer": "nori_tokenizer"
+      "max_ngram_diff": "2",
+      "number_of_shards": "1",
+      "number_of_replicas": "1",
+      "analysis": {
+        "analyzer": {
+          "nori_analyzer": {
+            "type": "custom",
+            "tokenizer": "nori_tokenizer",
+            "filter": ["nori_readingform", "nori_part_of_speech", "lowercase", "ngrammer"]
+          },
+          "ngram_analyzer": {
+            "type": "custom",
+            "tokenizer": "ngram_tokenizer",
+            "filter": ["lowercase"]
+          }
         },
-        "ngram_analyzer": {  // 검색 시 사용될 n-gram 분석기
-          "type": "custom",
-          "tokenizer": "ngram_tokenizer"
-        }
-      },
-      "tokenizer": {
-        "ngram_tokenizer": {  // n-gram 토크나이저 설정
-          "type": "ngram",
-          "min_gram": 1,
-          "max_gram": 3,
-          "token_chars": [
-            "letter",  // 알파벳 및 한글 같은 문자
-            "digit"    // 숫자
-          ]
+        "tokenizer": {
+          "ngram_tokenizer": {
+            "type": "ngram",
+            "min_gram": "1",
+            "max_gram": "3",
+            "token_chars": ["letter", "digit"]
+          }
+        },
+        "filter": {
+          "ngrammer": {
+            "type": "ngram",
+            "min_gram": 1,
+            "max_gram": 3
+          }
         }
       }
     }
@@ -211,8 +387,8 @@ PUT /area_board_search_term
       },
       "area_name": {
         "type": "text",
-        "analyzer": "nori_analyzer",         // 색인 시 nori 분석기 사용
-        "search_analyzer": "ngram_analyzer"  // 검색 시 n-gram 분석기 사용
+        "analyzer": "nori_analyzer",
+        "search_analyzer": "ngram_analyzer"
       },
       "max_updated_at": {
         "type": "date"
