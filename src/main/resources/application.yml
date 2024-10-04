@@ -6,7 +6,7 @@ spring:
     name: recommendation
 
 elasticsearch:
-  url: http://3.36.85.30:9200
+  url: https://3.38.214.251:9200
   username: elastic
   password: safe0113
   host: es01
