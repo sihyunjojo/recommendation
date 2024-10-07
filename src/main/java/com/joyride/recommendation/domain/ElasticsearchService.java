@@ -124,65 +124,72 @@ public class ElasticsearchService {
     private String createSearchByAreaNameQuery(String areaName) {
         return String.format("""
         {
+          "size": 10,
+          "_source": ["area_name"],
           "query": {
-            "function_score": {
-              "query": {
-                "match": {
-                  "area_name": {
-                    "query": "%s",
-                    "analyzer": "ngram_analyzer"
-                  }
-                }
-              },
-              "functions": [
+            "bool": {
+              "must": [
                 {
-                  "script_score": {
-                    "script": {
-                      "source": "double baseScore = _score; double maxView = 100.0; double currentView = doc['view'].value != null ? doc['view'].value : 1; double viewRatio = currentView / maxView; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = viewRatio * maxAllowedFactor; return baseScore + adjustedFactor;"
-                    }
+                  "function_score": {
+                    "query": {
+                      "dis_max": {
+                        "queries": [
+                          {
+                            "match": {
+                              "area_name.standard": {
+                                "query": "%s",
+                                "boost": 2.63,
+                                "analyzer": "edge_ngram_search_analyzer"
+                              }
+                            }
+                          },
+                          {
+                            "match": {
+                              "area_name.nori": {
+                                "query": "%s",
+                                "boost": 1.62,
+                                "analyzer": "edge_ngram_search_analyzer"
+                              }
+                            }
+                          },
+                          {
+                            "match": {
+                              "area_name.ngram": {
+                                "query": "%s",
+                                "boost": 1,
+                                "analyzer": "edge_ngram_search_analyzer"
+                              }
+                            }
+                          }
+                        ],
+                        "tie_breaker": 0
+                      }
+                    },
+                    "functions": [
+                      {
+                        "field_value_factor": {
+                          "field": "view",
+                          "factor": 0.3,
+                          "modifier": "log1p",
+                          "missing": 1
+                        }
+                      }
+                    ],
+                    "boost_mode": "sum",
+                    "score_mode": "sum",
+                    "min_score": 0.1
                   }
                 }
-              ],
-              "score_mode": "sum",
-              "boost_mode": "multiply"
+              ]
             }
           },
-          "size": 10,
-          "_source": ["area_name"]
+          "sort": [
+            "_score",
+            {"view": "desc"}
+          ]
         }
         """, areaName);
     }
-//    private String createSearchByAreaNameQuery(String areaName) {
-//        return String.format("""
-//                {
-//                  "query": {
-//                    "function_score": {
-//                      "query": {
-//                        "match": {
-//                          "area_name": {
-//                            "query": "%s",
-//                            "analyzer": "nori_analyzer"
-//                          }
-//                        }
-//                      },
-//                      "functions": [
-//                        {
-//                          "script_score": {
-//                            "script": {
-//                              "source": "double baseScore = _score; double maxView = 100.0; double currentView = doc['view'].value != null ? doc['view'].value : 1; double viewRatio = currentView / maxView; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = viewRatio * maxAllowedFactor; return baseScore + adjustedFactor;"
-//                            }
-//                          }
-//                        }
-//                      ],
-//                      "score_mode": "sum",
-//                      "boost_mode": "multiply"
-//                    }
-//                  },
-//                  "size": 10,
-//                  "_source": ["area_name"]
-//                }
-//                """, areaName);
-//    }
 
     // String[]**는 고정된 수의 데이터에 대해 빠른 접근이 필요할 때 유용
     // 응답을 파싱하고 상위 N개의 area_name을 반환
@@ -213,26 +220,11 @@ public class ElasticsearchService {
     private String createMultiIndexSearchTermQuery(String searchTerm) {
 //        return String.format("""
         return String.format("""
-                {"index":"area_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0; double postCountFactor = Math.log1p(postCount) * 1.2; return baseScore + postCountFactor;"}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["area_name"]}
                 {"index":"franchise_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0; double postCountFactor = Math.log1p(postCount) * 1.2; return baseScore + postCountFactor;"}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["franchise_name"]}
-                """, searchTerm, searchTerm);
-//            {"index":"area_board_search_term"}
-//            {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"
-//                double baseScore = _score;
-//                double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0;
-//                double postCountFactor = Math.log1p(postCount) * 1.2;
-//                return baseScore + postCountFactor;
-//            "}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["area_name"]}
-//            {"index":"franchise_board_search_term"}
-//            {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"
-//                double baseScore = _score;
-//                double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0;
-//                double postCountFactor = Math.log1p(postCount) * 1.2;
-//                return baseScore + postCountFactor;
-//            "}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["franchise_name"]}
-//            """, searchTerm, searchTerm);
+                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"dis_max":{"queries":[{"match":{"franchise_name.standard":{"query":"%s"}}},{"match":{"franchise_name.ngram":{"query":"이태원"}}},{"match":{"franchise_name.edge_ngram":{"query":"이태원"}}},{"match":{"franchise_name.nori":{"query":"이태원"}}}],"tie_breaker":0.3}}],"tie_breaker":0.3}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["franchise_name"]}
+                {"index":"area_board_search_term"}
+                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"match":{"area_name.ngram":{"query":"%s","analyzer":"edge_ngram_search_analyzer"}}},{"match":{"area_name.standard":{"query":"이태원"}}},{"match":{"area_name.nori":{"query":"이태원"}}}],"tie_breaker":0}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["area_name"]}
+                """, searchTerm);
     }
 
 
