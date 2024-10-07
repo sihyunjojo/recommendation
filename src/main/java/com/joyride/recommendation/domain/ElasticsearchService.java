@@ -200,23 +200,41 @@ public class ElasticsearchService {
     }
 
     /**
-     * 기본 점수: nori 분석기를 통한 텍스트 일치 점수. 예: 3.5
-     * 가중치 적용: post_count를 기반으로 계산된 가중치. 예: 7.5 (sqrt(25) * 1.5)
-     * weight 추가: post_count에 가중치 0.4를 적용하여 6:4 비율을 맞췄습니다.
-     * 최종 점수: 기본 점수와 가중치를 합산 또는 곱셈하여 최종 문서 점수 결정. 예: (3.5 * 0.6) + (7.5 * 0.4) = 최종 값
-     *
+     * 점수 계산 로직:
+     * 1. 기본 점수 (baseScore): nori 분석기를 통한 텍스트 일치 점수. 범위: 0-11 (예상)
+     * 2. 게시물 수 가중치 (postCountFactor): 게시물 수에 따른 추가 점수
+     * Math.log(postCount + 1) / Math.log(2)를 사용하여 게시물 수의 로그값을 계산합니다.
+     * 이 값에 0.6을 곱하여 게시물 수의 영향력을 조절합니다.
+     * 3. 최종 점수: 기본 점수 + 게시물 수 가중치
      * @param searchTerm
      * @return
      */
     // Multi Index용 요청 본문 생성
-    public String createMultiIndexSearchTermQuery(String searchTerm) {
+    private String createMultiIndexSearchTermQuery(String searchTerm) {
+//        return String.format("""
         return String.format("""
                 {"index":"area_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"ngram_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["area_name"]}
+                {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0; double postCountFactor = Math.log1p(postCount) * 1.2; return baseScore + postCountFactor;"}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["area_name"]}
                 {"index":"franchise_board_search_term"}
-                {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"ngram_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double maxPostCount = 100.0; double currentPostCount = doc['post_count'].value != null ? doc['post_count'].value : 1; double postCountRatio = currentPostCount / maxPostCount; double maxAllowedFactor = baseScore * 0.3; double adjustedFactor = postCountRatio * maxAllowedFactor; return baseScore + adjustedFactor;"}}}],"score_mode":"sum","boost_mode":"multiply"}},"size":10,"_source":["franchise_name"]}
+                {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"double baseScore = _score; double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0; double postCountFactor = Math.log1p(postCount) * 1.2; return baseScore + postCountFactor;"}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["franchise_name"]}
                 """, searchTerm, searchTerm);
+//            {"index":"area_board_search_term"}
+//            {"query":{"function_score":{"query":{"match":{"area_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"
+//                double baseScore = _score;
+//                double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0;
+//                double postCountFactor = Math.log1p(postCount) * 1.2;
+//                return baseScore + postCountFactor;
+//            "}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["area_name"]}
+//            {"index":"franchise_board_search_term"}
+//            {"query":{"function_score":{"query":{"match":{"franchise_name":{"query":"%s","analyzer":"nori_analyzer"}}},"functions":[{"script_score":{"script":{"source":"
+//                double baseScore = _score;
+//                double postCount = doc['post_count'].value != null ? doc['post_count'].value : 0;
+//                double postCountFactor = Math.log1p(postCount) * 1.2;
+//                return baseScore + postCountFactor;
+//            "}}}],"score_mode":"sum","boost_mode":"replace"}},"size":10,"_source":["franchise_name"]}
+//            """, searchTerm, searchTerm);
     }
+
 
     private String[] parseMultiIndexResults(String responseBody, int topN) {
         // JSON 응답 파싱
@@ -271,4 +289,3 @@ public class ElasticsearchService {
 //                .setDefaultCredentialsProvider(credentialsProvider)
 //                .build();
 //    }
-
