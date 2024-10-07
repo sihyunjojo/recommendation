@@ -188,7 +188,7 @@ public class ElasticsearchService {
             {"view": "desc"}
           ]
         }
-        """, areaName);
+        """, areaName, areaName, areaName);
     }
 
     // String[]**는 고정된 수의 데이터에 대해 빠른 접근이 필요할 때 유용
@@ -218,13 +218,12 @@ public class ElasticsearchService {
      */
     // Multi Index용 요청 본문 생성
     private String createMultiIndexSearchTermQuery(String searchTerm) {
-//        return String.format("""
         return String.format("""
                 {"index":"franchise_board_search_term"}
                 {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"dis_max":{"queries":[{"match":{"franchise_name.standard":{"query":"%s"}}},{"match":{"franchise_name.ngram":{"query":"이태원"}}},{"match":{"franchise_name.edge_ngram":{"query":"이태원"}}},{"match":{"franchise_name.nori":{"query":"이태원"}}}],"tie_breaker":0.3}}],"tie_breaker":0.3}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["franchise_name"]}
                 {"index":"area_board_search_term"}
                 {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"match":{"area_name.ngram":{"query":"%s","analyzer":"edge_ngram_search_analyzer"}}},{"match":{"area_name.standard":{"query":"이태원"}}},{"match":{"area_name.nori":{"query":"이태원"}}}],"tie_breaker":0}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["area_name"]}
-                """, searchTerm);
+                """, searchTerm, searchTerm);
     }
 
 
