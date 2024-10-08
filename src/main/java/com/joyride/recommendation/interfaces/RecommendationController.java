@@ -1,12 +1,15 @@
-package com.joyride.recommendation.domain;
+package com.joyride.recommendation.interfaces;
 
-import com.joyride.recommendation.dto.RecommendDto;
+import com.joyride.recommendation.domain.service.ElasticsearchService;
+import com.joyride.recommendation.interfaces.dto.RecommendDto;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 
+@Tag(name = "추천")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/recommendation")
