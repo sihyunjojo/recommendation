@@ -24,6 +24,7 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import java.io.IOException;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import org.json.JSONArray;
@@ -162,7 +163,7 @@ public class ElasticsearchService {
                             }
                           }
                         ],
-                        "tie_breaker": 0
+                        "tie_breaker": 0.1
                       }
                     },
                     "functions": [
@@ -219,41 +220,75 @@ public class ElasticsearchService {
     // Multi Index용 요청 본문 생성
     private String createMultiIndexSearchTermQuery(String searchTerm) {
         return String.format("""
-                {"index":"franchise_board_search_term"}
-                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"dis_max":{"queries":[{"match":{"franchise_name.standard":{"query":"%s"}}},{"match":{"franchise_name.ngram":{"query":"%s"}}},{"match":{"franchise_name.edge_ngram":{"query":"%s"}}},{"match":{"franchise_name.nori":{"query":"%s"}}}],"tie_breaker":0.3}}],"tie_breaker":0.3}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["franchise_name"]}
                 {"index":"area_board_search_term"}
-                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"match":{"area_name.ngram":{"query":"%s","analyzer":"edge_ngram_search_analyzer"}}},{"match":{"area_name.standard":{"query":"%s"}}},{"match":{"area_name.nori":{"query":"%s"}}}],"tie_breaker":0}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["area_name"]}
+                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"match":{"area_name.ngram":{"query":"%s","analyzer":"edge_ngram_search_analyzer","boost":1.3}}},{"match":{"area_name.standard":{"query":"%s","boost":4}}},{"match":{"area_name.nori":{"query":"%s","boost":3}}}],"tie_breaker":0}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["area_name","post_count"]}
+                {"index":"franchise_board_search_term"}
+                {"query":{"bool":{"must":[{"function_score":{"query":{"dis_max":{"queries":[{"dis_max":{"queries":[{"match":{"franchise_name.standard":{"query":"%s","boost":3}}},{"match":{"franchise_name.ngram":{"query":"%s","boost":1}}},{"match":{"franchise_name.edge_ngram":{"query":"%s","boost":2.4}}},{"match":{"franchise_name.nori":{"query":"%s","boost":2}}}],"tie_breaker":0}}],"tie_breaker":0}},"functions":[{"field_value_factor":{"field":"post_count","factor":0.6,"modifier":"log1p","missing":1}}],"boost_mode":"sum","score_mode":"sum"}}]}},"size":10,"_source":["franchise_name","post_count"]}
                 """, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-
+    // 두 인덱스 결과를 최소 20퍼센트를 보장.
+    // 남은 결과를 점수 순서대로 병합하여 추가.
+    // combinedHits와 remainingHits를 결합한 후 최종적으로 점수 순서대로 상위 topN개의 결과를 반환.
     private String[] parseMultiIndexResults(String responseBody, int topN) {
-        // JSON 응답 파싱
         JSONObject jsonResponse = new JSONObject(responseBody);
         JSONArray responses = jsonResponse.getJSONArray("responses");
 
-        // 모든 인덱스의 hits를 모아 하나의 리스트에 저장
-        List<JSONObject> allHits = new ArrayList<>();
+        List<JSONObject> areaHits = new ArrayList<>();
+        List<JSONObject> franchiseHits = new ArrayList<>();
+
+        // Separate hits by index
         for (int i = 0; i < responses.length(); i++) {
             JSONObject response = responses.getJSONObject(i);
             JSONArray hits = response.getJSONObject("hits").getJSONArray("hits");
 
-            // 각 hit를 allHits 리스트에 추가
             for (int j = 0; j < hits.length(); j++) {
-                allHits.add(hits.getJSONObject(j));
+                JSONObject hit = hits.getJSONObject(j);
+                if (hit.getJSONObject("_source").has("area_name")) {
+                    areaHits.add(hit);
+                } else {
+                    franchiseHits.add(hit);
+                }
             }
         }
 
-        // 점수를 기준으로 정렬
-        allHits.sort((hit1, hit2) -> Double.compare(hit2.getDouble("_score"), hit1.getDouble("_score")));
+        // Sort hits by score
+        Comparator<JSONObject> scoreComparator = (hit1, hit2) ->
+                Double.compare(hit2.getDouble("_score"), hit1.getDouble("_score"));
+        areaHits.sort(scoreComparator);
+        franchiseHits.sort(scoreComparator);
 
-        String[] topNames = new String[Math.min(topN, allHits.size())];
-        for (int i = 0; i < topNames.length; i++) {
-            JSONObject source = allHits.get(i).getJSONObject("_source");
-            topNames[i] = source.has("area_name") ? source.getString("area_name") : source.getString("franchise_name");
+        // Calculate the minimum number of results from each index
+        int minResultsPerIndex = (int) Math.ceil(topN * 0.2);
+
+        List<JSONObject> combinedHits = new ArrayList<>();
+        combinedHits.addAll(areaHits.subList(0, Math.min(minResultsPerIndex, areaHits.size())));
+        combinedHits.addAll(franchiseHits.subList(0, Math.min(minResultsPerIndex, franchiseHits.size())));
+
+        // Combine remaining hits and sort by score
+        List<JSONObject> remainingHits = new ArrayList<>();
+        remainingHits.addAll(areaHits.subList(Math.min(minResultsPerIndex, areaHits.size()), areaHits.size()));
+        remainingHits.addAll(franchiseHits.subList(Math.min(minResultsPerIndex, franchiseHits.size()), franchiseHits.size()));
+        remainingHits.sort(scoreComparator);
+
+        // Add remaining hits based on score
+        combinedHits.addAll(remainingHits.subList(0, Math.min(topN - combinedHits.size(), remainingHits.size())));
+
+        // Get topN results
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < Math.min(topN, combinedHits.size()); i++) {
+            JSONObject hit = combinedHits.get(i);
+            if (hit.getJSONObject("_source").has("area_name")) {
+                result.add(hit.getJSONObject("_source").getString("area_name"));
+            } else {
+                result.add(hit.getJSONObject("_source").getString("franchise_name"));
+            }
         }
-        return topNames;
+
+        return result.toArray(new String[0]);
     }
+
+
 }
 
 // SSL 인증서를 신뢰할 수 있도록 설정된 HTTP 클라이언트를 생성합니다. (개발용)
@@ -280,3 +315,32 @@ public class ElasticsearchService {
 //                .setDefaultCredentialsProvider(credentialsProvider)
 //                .build();
 //    }
+
+
+//private String[] parseMultiIndexResults(String responseBody, int topN) {
+//    // JSON 응답 파싱
+//    JSONObject jsonResponse = new JSONObject(responseBody);
+//    JSONArray responses = jsonResponse.getJSONArray("responses");
+//
+//    // 모든 인덱스의 hits를 모아 하나의 리스트에 저장
+//    List<JSONObject> allHits = new ArrayList<>();
+//    for (int i = 0; i < responses.length(); i++) {
+//        JSONObject response = responses.getJSONObject(i);
+//        JSONArray hits = response.getJSONObject("hits").getJSONArray("hits");
+//
+//        // 각 hit를 allHits 리스트에 추가
+//        for (int j = 0; j < hits.length(); j++) {
+//            allHits.add(hits.getJSONObject(j));
+//        }
+//    }
+//
+//    // 점수를 기준으로 정렬
+//    allHits.sort((hit1, hit2) -> Double.compare(hit2.getDouble("_score"), hit1.getDouble("_score")));
+//
+//    String[] topNames = new String[Math.min(topN, allHits.size())];
+//    for (int i = 0; i < topNames.length; i++) {
+//        JSONObject source = allHits.get(i).getJSONObject("_source");
+//        topNames[i] = source.has("area_name") ? source.getString("area_name") : source.getString("franchise_name");
+//    }
+//    return topNames;
+//}
