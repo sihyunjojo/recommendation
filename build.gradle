@@ -34,7 +34,8 @@ dependencies {
 
 
     implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
-//    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    implementation 'org.springframework.cloud:spring-cloud-starter-config'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -71,4 +72,18 @@ dependencyManagement {
     }
 }
 
+tasks.register('copyYML', Copy) {
+    from 'config-secret-d108'
+    include "recommendation-dev.yml"  // 원하는 YML 파일만 복사
+    into 'src/main/resources'  // 파일을 복사할 위치
+    rename 'recommendation-dev.yml', 'application.yml'  // 파일명 변경
+}
 
+tasks.named('build') {
+    dependsOn('copyYML')
+}
+
+// 혹은 processResources 작업과 연결
+tasks.named('processResources') {
+    dependsOn('copyYML')
+}

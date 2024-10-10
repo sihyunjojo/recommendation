@@ -1,29 +1,7 @@
-server:
-  port: 8085
-
 spring:
   application:
     name: recommendation
-
-elasticsearch:
-  url: https://3.38.214.251:9200
-  username: elastic
-  password: safe0113
-  host: es01
-  port: 9200
-  ca-cert-path: /home/sihyun/certs/ca/ca.crt
-#  ca-cert-path: /Users/josihyeon/documents/project/certs/ca/ca.crt
-
-
-logging:
-  level:
-    org.apache.http: DEBUG
-    org.apache.http.wire: DEBUG
-    com.joyride.recommendation: DEBUG
-    root: INFO
-
-
-# SSL 디버깅을 위한 추가 설정
-javax:
-  net:
-    debug: ssl,handshake
+  profiles:
+    active: dev
+  config:
+    import: optional:configserver:http://admin:safe0113@15.165.236.50:9000

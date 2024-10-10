@@ -12,7 +12,7 @@ import java.io.IOException;
 @Tag(name = "추천")
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/recommendation")
+@RequestMapping("/api/v1/recommendation")
 public class RecommendationController {
 
     private final ElasticsearchService elasticsearchService;
