@@ -1,0 +1,57 @@
+metricbeat.config.modules:
+  path: ${path.config}/modules.d/*.yml   # Metricbeat 모듈 설정 파일들이 위치한 경로를 지정합니다. ${path.config}는 기본 설정 경로입니다.
+  # 컨테이너를 이용해 Metricbeat를 실행할 경우, 컨테이너 내부에서 Metricbeat의 기본 설정 경로는 보통 /usr/share/metricbeat
+  reload.enabled: false   # 실행 중에 모듈 설정 파일이 변경되더라도 자동으로 다시 로드하지 않도록 설정합니다.
+
+metricbeat.modules:
+  - module: elasticsearch   # Elasticsearch 모듈을 사용하여 Elasticsearch 메트릭을 수집합니다.
+    xpack.enabled: true   # X-Pack이 활성화된 Elasticsearch에서 추가적인 메트릭 수집을 가능하게 합니다.
+    period: 10s   # 메트릭 수집 주기를 10초로 설정합니다.
+    hosts: ${ELASTIC_HOSTS}   # 메트릭을 수집할 Elasticsearch 호스트 주소를 환경 변수에서 가져옵니다.
+    ssl.certificate_authorities: "certs/ca/ca.crt"   # SSL 통신을 위해 사용할 CA 인증서를 설정합니다.
+    ssl.certificate: "certs/es01/es01.crt"   # Elasticsearch 서버와의 통신에 사용할 SSL 인증서입니다.
+    ssl.key: "certs/es01/es01.key"   # SSL 인증서에 대응하는 개인 키입니다.
+    username: ${ELASTIC_USER}   # Elasticsearch에 인증할 때 사용할 사용자 이름을 환경 변수에서 가져옵니다.
+    password: ${ELASTIC_PASSWORD}   # Elasticsearch에 인증할 때 사용할 비밀번호를 환경 변수에서 가져옵니다.
+    ssl.enabled: true   # SSL 통신을 활성화하여 보안 연결을 사용합니다.
+
+  - module: logstash   # Logstash 모듈을 사용하여 Logstash 메트릭을 수집합니다.
+    xpack.enabled: true   # X-Pack이 활성화된 Logstash에서 추가적인 메트릭 수집을 가능하게 합니다.
+    period: 10s   # 메트릭 수집 주기를 10초로 설정합니다.
+    hosts: ${LOGSTASH_HOSTS}   # Logstash 호스트 주소를 환경 변수에서 가져옵니다.
+
+  - module: kibana   # Kibana 모듈을 사용하여 Kibana 메트릭을 수집합니다.
+    metricsets:
+      - stats   # 수집할 메트릭 유형으로 stats(통계 정보)를 설정합니다.
+    period: 10s   # 메트릭 수집 주기를 10초로 설정합니다.
+    hosts: ${KIBANA_HOSTS}   # Kibana 호스트 주소를 환경 변수에서 가져옵니다.
+    username: ${ELASTIC_USER}   # Kibana에 인증할 때 사용할 사용자 이름을 환경 변수에서 가져옵니다.
+    password: ${ELASTIC_PASSWORD}   # Kibana에 인증할 때 사용할 비밀번호를 환경 변수에서 가져옵니다.
+    xpack.enabled: true   # X-Pack이 활성화된 Kibana에서 추가적인 메트릭 수집을 가능하게 합니다.
+
+  - module: docker   # Docker 모듈을 사용하여 Docker 컨테이너 메트릭을 수집합니다.
+    metricsets:
+      - "container"   # Docker 컨테이너의 메트릭(컨테이너 상태, 이름, ID 등)을 수집합니다.
+      - "cpu"   # Docker 컨테이너의 CPU 사용량 메트릭을 수집합니다.
+      - "diskio"   # Docker 컨테이너의 디스크 I/O 메트릭을 수집합니다.
+      - "healthcheck"   # Docker 컨테이너의 헬스체크 상태를 수집합니다.
+      - "info"   # Docker 엔진 정보와 컨테이너 관련 정보를 수집합니다.
+      #- "image"   # Docker 이미지 관련 메트릭 수집 (주석 처리되어 사용되지 않음).
+      - "memory"   # Docker 컨테이너의 메모리 사용량 메트릭을 수집합니다.
+      - "network"   # Docker 컨테이너의 네트워크 트래픽 메트릭을 수집합니다.
+    hosts: ["unix:///var/run/docker.sock"]   # Docker 소켓을 통해 Docker 데몬과 통신하여 메트릭을 수집합니다.
+    period: 10s   # 메트릭 수집 주기를 10초로 설정합니다.
+    enabled: true   # Docker 모듈을 활성화합니다.
+
+processors:
+  - add_host_metadata: ~   # 수집된 메트릭에 호스트 메타데이터(예: 호스트 이름, IP)를 추가합니다.
+  - add_docker_metadata: ~   # 수집된 메트릭에 Docker 관련 메타데이터(예: 컨테이너 ID, 이미지 이름)를 추가합니다.
+
+output.elasticsearch:
+  hosts: ${ELASTIC_HOSTS}   # 수집된 메트릭을 전송할 Elasticsearch 호스트 주소를 환경 변수에서 가져옵니다.
+  username: ${ELASTIC_USER}   # Elasticsearch에 인증할 때 사용할 사용자 이름을 환경 변수에서 가져옵니다.
+  password: ${ELASTIC_PASSWORD}   # Elasticsearch에 인증할 때 사용할 비밀번호를 환경 변수에서 가져옵니다.
+  ssl:
+    certificate: "certs/es01/es01.crt"   # Elasticsearch와 SSL 통신을 할 때 사용할 인증서입니다.
+    certificate_authorities: "certs/ca/ca.crt"   # Elasticsearch와 SSL 통신을 할 때 사용할 CA 인증서입니다.
+    key: "certs/es01/es01.key"   # Elasticsearch와 SSL 통신을 할 때 사용할 개인 키입니다.

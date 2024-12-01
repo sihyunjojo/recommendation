@@ -1,0 +1,321 @@
+volumes:  # 서비스들이 사용하는 데이터 저장소 설정
+  certs:  # 인증서 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+  esdata01:  # Elasticsearch 데이터 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+  kibanadata:  # Kibana 데이터 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+  metricbeatdata01:  # Metricbeat 데이터 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+  filebeatdata01:  # Filebeat 데이터 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+  logstashdata01: # logstash 데이터 저장용 볼륨
+    driver: local  # 로컬 드라이버 사용
+
+# networks 항목에 default를 정의하면, 도커 컴포즈는 기본적으로 모든 서비스 컨테이너를 이 네트워크에 자동으로 연결
+networks:  # 네트워크 설정
+  default:  # 기본 네트워크 설정
+    name: elastic-network  # 네트워크 이름 설정
+    external: false  # 외부 네트워크를 사용하지 않음  # 네트워크가 없으면 생성
+
+services:  # 서비스 정의
+  setup:  # Elasticsearch 설정을 위한 서비스
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}  # Elasticsearch 이미지 사용
+    volumes:  # 볼륨 마운트
+      - certs:/usr/share/elasticsearch/config/certs  # 인증서 볼륨을 컨테이너 내 경로에 마운트
+    user: "0"  # root 사용자로 실행
+    command: >  # 실행할 커맨드 지정 (ssl 인증서 만드는 작업)
+      bash -c '
+        if [ x${ELASTIC_PASSWORD} == x ]; then
+          echo "Set the ELASTIC_PASSWORD environment variable in the .env file";
+          exit 1;
+        elif [ x${KIBANA_PASSWORD} == x ]; then
+          echo "Set the KIBANA_PASSWORD environment variable in the .env file";
+          exit 1;
+        fi;
+        if [ ! -f config/certs/ca.zip ]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip config/certs/ca.zip -d config/certs;
+        fi;
+        if [ ! -f config/certs/certs.zip ]; then
+          echo "Creating certs";
+          echo -ne \
+          "instances:\n"\
+          "  - name: es01\n"\
+          "    dns:\n"\
+          "      - es01\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: kibana\n"\
+          "    dns:\n"\
+          "      - kibana\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip config/certs/certs.zip -d config/certs;
+        fi;
+        echo "Setting file permissions"
+        chown -R root:root config/certs;
+        find . -type d -exec chmod 750 \{\} \;;
+        find . -type f -exec chmod 640 \{\} \;;
+        echo "Waiting for Elasticsearch availability";
+        until curl -s --cacert config/certs/ca/ca.crt https://es01:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://es01:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
+        echo "All done!";
+      '
+    healthcheck:  # 서비스 헬스체크 설정
+      test: ["CMD-SHELL", "[ -f config/certs/es01/es01.crt ]"]  # es01 인증서 파일 존재 여부 확인
+      interval: 1s  # 헬스체크 간격 1초
+      timeout: 5s  # 헬스체크 타임아웃 5초
+      retries: 120  # 헬스체크 재시도 횟수 120회
+
+  es01:  # Elasticsearch 인스턴스 정의
+    depends_on:  # setup 서비스에 의존
+      setup:
+        condition: service_healthy  # setup 서비스가 헬스체크를 통과한 경우에만 시작
+#    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}  # Elasticsearch 이미지 사용
+    build:
+      context: .
+      dockerfile: Dockerfile_ES
+      args:
+        STACK_VERSION: ${STACK_VERSION}  # .env 파일에서 STACK_VERSION을 Dockerfile로 전달
+    labels:
+      co.elastic.logs/module: elasticsearch  # 로그 모듈 설정 (Elastic 모니터링을 위해)
+    volumes:  # 볼륨 마운트
+      - certs:/usr/share/elasticsearch/config/certs  # 인증서 볼륨을 마운트
+      - esdata01:/usr/share/elasticsearch/data  # 데이터 볼륨을 마운트
+      - ./log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties  # 로그 설정 파일 추가
+      - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml  # elasticsearch.yml 볼륨으로 추가
+    ports:
+      - ${ES_PORT}:9200  # 호스트와의 포트 매핑
+    environment:  # 환경 변수 설정
+      - node.name=es01  # 노드 이름 설정
+      - cluster.name=${CLUSTER_NAME}  # 클러스터 이름 설정
+      - discovery.type=single-node  # 싱글 노드 모드 설정
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}  # Elasticsearch 기본 사용자 비밀번호 설정
+      - bootstrap.memory_lock=true  # 메모리 잠금 설정 (메모리 스와핑 방지)
+      - xpack.security.enabled=true  # 보안 기능 활성화 (주석 처리)
+      - xpack.security.http.ssl.enabled=true  # HTTP SSL 활성화 (주석 처리)
+      - xpack.security.http.ssl.key=certs/es01/es01.key  # SSL 키 파일 설정 (주석 처리)
+      - xpack.security.http.ssl.certificate=certs/es01/es01.crt  # SSL 인증서 설정 (주석 처리)
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt  # CA 인증서 설정 (주석 처리)
+      - xpack.security.transport.ssl.enabled=true  # 트랜스포트 SSL 활성화 (주석 처리)
+      - xpack.security.transport.ssl.key=certs/es01/es01.key  # 트랜스포트 SSL 키 파일 설정 (주석 처리)
+      - xpack.security.transport.ssl.certificate=certs/es01/es01.crt  # 트랜스포트 SSL 인증서 설정 (주석 처리)
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt  # 트랜스포트 CA 인증서 설정 (주석 처리)
+      - xpack.security.transport.ssl.verification_mode=certificate  # 인증서 검증 모드 설정 (주석 처리)
+      - xpack.license.self_generated.type=${LICENSE}  # 라이선스 타입 설정 (주석 처리)
+      - TZ=Asia/Seoul  # 시간대 설정 추가
+      - JAVA_OPTS="-Xms512m -Xmx2g"  # JVM 메모리 설정 추가
+    mem_limit: ${ES_MEM_LIMIT}  # 메모리 제한 설정
+    ulimits:  # 리소스 제한 설정
+      memlock:
+        soft: -1  # 메모리 잠금 소프트 제한 (무제한)
+        hard: -1  # 메모리 잠금 하드 제한 (무제한)
+    healthcheck:  # 서비스 헬스체크 설정
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'",  # 인증서 사용하여 헬스체크
+        ]
+      interval: 10s  # 헬스체크 간격 10초
+      timeout: 10s  # 헬스체크 타임아웃 10초
+      retries: 120  # 헬스체크 재시도 횟수 120회
+
+
+  kibana:  # Kibana 인스턴스 정의
+    container_name: kibana
+    depends_on:  # es01 서비스에 의존
+      es01:
+        condition: service_healthy  # es01 서비스가 헬스체크를 통과한 경우에만 시작
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}  # Kibana 이미지 사용
+    labels:
+      co.elastic.logs/module: kibana  # 로그 모듈 설정 (Elastic 모니터링을 위해)
+    volumes:  # 볼륨 마운트
+      - certs:/usr/share/kibana/config/certs  # 인증서 볼륨 마운트
+      - kibanadata:/usr/share/kibana/data  # 데이터 볼륨 마운트
+    ports:
+      - ${KIBANA_PORT}:5601  # 호스트와의 포트 매핑
+    environment:  # 환경 변수 설정
+      - TZ=Asia/Seoul  # 시간대 설정
+      - SERVERNAME=kibana  # Kibana 서버 이름 설정
+      - ELASTICSEARCH_HOSTS=https://es01:9200  # Elasticsearch 호스트 주소 설정
+      - ELASTICSEARCH_USERNAME=kibana_system  # Elasticsearch 사용자 이름 설정
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}  # Elasticsearch 사용자 비밀번호 설정
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt  # CA 인증서 설정 (주석 처리)
+      - XPACK_SECURITY_ENCRYPTIONKEY=${ENCRYPTION_KEY}  # 보안 암호화 키 설정 (주석 처리)
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${ENCRYPTION_KEY}  # 저장된 객체 암호화 키 설정 (주석 처리)
+      - XPACK_REPORTING_ENCRYPTIONKEY=${ENCRYPTION_KEY}  # 리포팅 암호화 키 설정 (주석 처리)
+    mem_limit: ${KB_MEM_LIMIT}  # 메모리 제한 설정
+    healthcheck:  # 서비스 헬스체크 설정
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",  # HTTP 상태 코드로 헬스체크
+        ]
+      interval: 10s  # 헬스체크 간격 10초
+      timeout: 10s  # 헬스체크 타임아웃 10초
+      retries: 120  # 헬스체크 재시도 횟수 120회
+
+  metricbeat01:  # Metricbeat 인스턴스 정의
+    container_name: metricbeat
+    depends_on:  # es01 및 kibana 서비스에 의존
+      es01:
+        condition: service_healthy  # es01 서비스가 헬스체크를 통과한 경우에만 시작
+      kibana:
+        condition: service_healthy  # kibana 서비스가 헬스체크를 통과한 경우에만 시작
+    image: docker.elastic.co/beats/metricbeat:${STACK_VERSION}  # Metricbeat 이미지 사용
+    user: root  # root 사용자로 실행
+    volumes:  # 볼륨 마운트
+      - certs:/usr/share/metricbeat/certs  # 인증서 볼륨 마운트
+      - metricbeatdata01:/usr/share/metricbeat/data  # 데이터 볼륨 마운트
+      - "./metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro"  # 로컬의 metricbeat.yml 파일을 읽기 전용으로 마운트
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - type: bind
+        source: /sys/fs/cgroup
+        target: /hostfs/sys/fs/cgroup
+        read_only: true
+      - type: bind
+        source: /proc
+        target: /hostfs/proc
+        read_only: true
+      - type: bind
+        source: /
+        target: /hostfs
+        read_only: true
+    environment:  # 환경 변수 설정
+      - TZ=Asia/Seoul  # 시간대 설정
+      - ELASTIC_USER=elastic  # Elasticsearch 사용자 이름 설정
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}  # Elasticsearch 사용자 비밀번호 설정
+      - ELASTIC_HOSTS=https://es01:9200  # Elasticsearch 호스트 주소 설정
+      - KIBANA_HOSTS=http://kibana:5601  # Kibana 호스트 주소 설정
+      - LOGSTASH_HOSTS=http://logstash01:9600  # Logstash 호스트 주소 설정
+    command:  # Metricbeat 실행 시 명령어
+      - --strict.perms=false  # 권한 엄격성 설정 비활성화
+    security_opt:
+      - label:disable
+
+
+  filebeat01:
+    container_name: filebeat
+    depends_on:
+      es01:
+        condition: service_healthy
+    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
+    user: root
+#    ports:
+#      - "5066:5066"  # Filebeat HTTP 모니터링 포트를 호스트와 매핑
+    volumes:
+      - certs:/usr/share/filebeat/certs
+      - filebeatdata01:/usr/share/filebeat/data
+      - "/tmp/logs/log-collector:/usr/share/filebeat/logs"
+      - "./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro"
+      - type: bind
+        source: /var/lib/docker/containers
+        target: /var/lib/docker/containers
+        read_only: true
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+    environment:  # 환경 변수 설정
+      - TZ=Asia/Seoul  # 시간대 설정
+      - ELASTIC_USER=elastic  # Elasticsearch 사용자 이름 설정
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}  # Elasticsearch 사용자 비밀번호 설정
+      - ELASTIC_HOSTS=https://es01:9200  # Elasticsearch 호스트 주소 설정
+      - KIBANA_HOSTS=http://kibana:5601  # Kibana 호스트 주소 설정
+      - LOGSTASH_HOSTS=http://logstash01:9600  # Logstash 호스트 주소 설정
+      - JAVA_OPTS="-Xms512m -Xmx2g"  # JVM 메모리 설정 추가
+    command:  # Filebeat 실행 시 명령어
+      - --strict.perms=false  # 권한 엄격성 설정 비활성화
+    security_opt:
+      - label:disable
+
+  logstash01:  # Logstash 인스턴스 정의
+    container_name: logstash
+    build:
+      context: .
+      dockerfile: Dockerfile_LS  # MariaDB JDBC 드라이버 다운로드 및 Logstash 설정을 위한 Dockerfile
+      args:
+        STACK_VERSION: ${STACK_VERSION}  # .env 파일에서 STACK_VERSION을 Dockerfile로 전달
+    depends_on:  # es01 및 kibana 서비스에 의존
+      es01:
+        condition: service_healthy  # es01 서비스가 헬스체크를 통과한 경우에만 시작
+      kibana:
+        condition: service_healthy  # kibana 서비스가 헬스체크를 통과한 경우에만 시작
+    labels:
+      co.elastic.logs/module: logstash  # 로그 모듈 설정 (Elastic 모니터링을 위해)
+    user: root  # root 사용자로 실행
+    volumes:  # 볼륨 마운트
+      - certs:/usr/share/logstash/certs  # 인증서 볼륨 마운트
+      - logstashdata01:/usr/share/logstash/data  # 데이터 볼륨 마운트
+    environment:  # 환경 변수 설정
+      - TZ=Asia/Seoul  # 시간대 설정
+      - xpack.monitoring.enabled=false  # X-Pack 모니터링 비활성화
+      - ELASTIC_USER=elastic  # Elasticsearch 사용자 이름 설정
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}  # Elasticsearch 사용자 비밀번호 설정
+      - ELASTIC_HOSTS=https://es01:9200  # Elasticsearch 호스트 주소 설정
+      - LOG_LEVEL=info
+      - JAVA_OPTS="-Xms512m -Xmx2g"  # JVM 메모리 설정 추가
+    mem_limit: ${LS_MEM_LIMIT}
+    command: /bin/sh -c  "mkdir -p /var/lib/logstash/metadata && \
+      [ ! -f /var/lib/logstash/metadata/last_run_metadata_area.yml ] && touch /var/lib/logstash/metadata/last_run_metadata_area.yml && \
+      [ ! -f /var/lib/logstash/metadata/last_run_metadata_area_posts.yml ] && touch /var/lib/logstash/metadata/last_run_metadata_area_posts.yml && \
+      [ ! -f /var/lib/logstash/metadata/last_run_metadata_franchises_posts.yml ] && touch /var/lib/logstash/metadata/last_run_metadata_franchises_posts.yml && \
+      logstash -f /usr/share/logstash/pipeline/logstash.conf"
+
+
+
+
+
+#  bash -c '
+#  if [ x${ELASTIC_PASSWORD} == x ]; then  # ELASTIC_PASSWORD 환경 변수가 설정되지 않았는지 확인
+#  echo "Set the ELASTIC_PASSWORD environment variable in the .env file";  # 설정 요청 메시지 출력
+#  exit 1;  # 오류로 종료
+#  elif [ x${KIBANA_PASSWORD} == x ]; then  # KIBANA_PASSWORD 환경 변수가 설정되지 않았는지 확인
+#  echo "Set the KIBANA_PASSWORD environment variable in the .env file";  # 설정 요청 메시지 출력
+#  exit 1;  # 오류로 종료
+#  fi;
+#  if [ ! -f config/certs/ca.zip ]; then  # CA 인증서가 없으면
+#  echo "Creating CA";  # CA 생성 중 메시지 출력
+#  bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;  # CA 인증서 생성
+#  unzip config/certs/ca.zip -d config/certs;  # 생성된 인증서 압축 해제
+#  fi;
+#  if [ ! -f config/certs/certs.zip ]; then  # SSL 인증서가 없으면
+#  echo "Creating certs";  # 인증서 생성 중 메시지 출력
+#  echo -ne \
+#  "instances:\n"\
+#  "  - name: es01\n"\
+#  "    dns:\n"\
+#  "      - es01\n"\
+#  "      - localhost\n"\
+#  "    ip:\n"\
+#  "      - 127.0.0.1\n"\
+#  "  - name: kibana\n"\
+#  "    dns:\n"\
+#  "      - kibana\n"\
+#  "      - localhost\n"\
+#  "    ip:\n"\
+#  "      - 127.0.0.1\n"\
+#  > config/certs/instances.yml;  # 인증서에 포함될 인스턴스 정보 작성
+#  bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;  # SSL 인증서 생성
+#  unzip config/certs/certs.zip -d config/certs;  # 생성된 인증서 압축 해제
+#  fi;
+#  echo "Setting file permissions"  # 파일 권한 설정 메시지 출력
+#  chown -R root:root config/certs;  # 파일 소유자를 root로 변경
+#  find . -type d -exec chmod 750 \{\} \;;  # 디렉터리 권한 설정
+#  find . -type f -exec chmod 640 \{\} \;;  # 파일 권한 설정
+#  echo "Waiting for Elasticsearch availability";  # Elasticsearch 가용성 대기 메시지 출력
+#  until curl -s --cacert config/certs/ca/ca.crt https://es01:9200 | grep -q "missing authentication credentials"; do sleep 30; done;  # Elasticsearch 가용성 확인
+#  echo "Setting kibana_system password";  # Kibana 시스템 비밀번호 설정 메시지 출력
+#until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://es01:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;  # Kibana 비밀번호 설정
+#  echo "All done!";  # 설정 완료 메시지 출력
+#  '

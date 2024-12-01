@@ -1,0 +1,11 @@
+# docker-compose에서 전달된 STACK_VERSION을 받음
+ARG STACK_VERSION
+
+# ${STACK_VERSION}을 사용하는 Elasticsearch 이미지
+FROM docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+
+# Nori 분석기 플러그인 설치
+RUN elasticsearch-plugin install analysis-nori
+
+# elasticsearch 실행
+CMD ["elasticsearch"]
